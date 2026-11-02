@@ -199,13 +199,13 @@ public class FusionLocalizer implements Localizer {
         // Covariance at measurement time
         Matrix Pm = interpolatedData.covariance;
 
-        // Innovation covariance S = P + R
-        Matrix S = Pm.plus(measurementR);
+        // Unmeasured axes are absent observations, not measurements of zero innovation.
+        Matrix S = M.times(Pm).times(M.transpose()).plus(measurementR);
 
-        // Apply gain K = P * (P + R)^(-1)
+        // Apply gain K = P * H^T * (H * P * H^T + R)^(-1), with H = M.
         Matrix S_inv = S.invert();
         if (S_inv == null) return;
-        Matrix K = Pm.times(S_inv);
+        Matrix K = Pm.times(M.transpose()).times(S_inv);
 
         if (interpolatedData.upperKey != null) {
             KalmanState upperEntry = history.get(interpolatedData.upperKey);
@@ -218,8 +218,6 @@ public class FusionLocalizer implements Localizer {
                             upperEntry.covariance));
         }
 
-        // Apply mask
-        K = M.times(K);
         innovation = M.times(innovation);
 
         // State update
@@ -229,7 +227,7 @@ public class FusionLocalizer implements Localizer {
 
         // Joseph-form covariance update
         Matrix I = Matrix.identity(3);
-        Matrix IK = I.minus(K);
+        Matrix IK = I.minus(K.times(M));
         Matrix cov = IK.times(Pm)
                 .times(IK.transpose())
                 .plus(K.times(measurementR).times(K.transpose()))
