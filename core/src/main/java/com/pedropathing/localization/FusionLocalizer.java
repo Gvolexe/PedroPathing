@@ -277,9 +277,10 @@ public class FusionLocalizer implements Localizer {
         Twist lowerTwist = lower.twist;
         Twist upperTwist = upper.twist;
         Twist interpolTwist = lowerTwist.plus(upperTwist.minus(lowerTwist).times(ratio));
-        Pose interpolPose = Pose.interpolate(lower.pose, upper.pose, ratio);
-
         Pose toMeasurement = interpolateTransform(Pose.zero(), upper.relativeTransform, ratio);
+        // Split the historical pose with the same SE(2) interpolation as its odometry transform.
+        // With zero innovation, composing this pose and the remainder must recover the upper sample.
+        Pose interpolPose = lower.pose.compose(toMeasurement);
         Pose remainder = toMeasurement.invert().compose(upper.relativeTransform);
 
         KalmanState result = new KalmanState(interpolPose, interpolTwist, toMeasurement, lower.covariance);
