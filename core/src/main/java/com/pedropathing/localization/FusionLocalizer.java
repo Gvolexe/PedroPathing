@@ -36,6 +36,7 @@ public class FusionLocalizer implements Localizer {
     private MotionState motionState;
     private Pose currentRelativeTransform;
     private Matrix P; // State Covariance
+    private final Matrix initialCovariance;
     private final Matrix Q; // Process Noise Covariance
     private final Matrix R; // Measurement Noise Covariance
     private long lastUpdateTime = -1;
@@ -57,6 +58,7 @@ public class FusionLocalizer implements Localizer {
                 Math.max(initialCovariance.x(), EPSILON),
                 Math.max(initialCovariance.y(), EPSILON),
                 Math.max(initialCovariance.heading(), EPSILON));
+        this.initialCovariance = new Matrix(P.data, P.rows, P.cols);
         this.Q = Matrix.diag(
                 Math.max(processVariance.x(), EPSILON),
                 Math.max(processVariance.y(), EPSILON),
@@ -99,9 +101,21 @@ public class FusionLocalizer implements Localizer {
         if (history.size() > bufferSize) history.pollFirstEntry();
     }
 
+    /**
+     * Resets odometry and the fused estimate to zero, discards vision history, and restores the initial covariance.
+     * The wrapped pose is set explicitly because hardware resets may leave a stale cached state until the next update.
+     */
     @Override
     public void reset() {
         deadReckoning.reset();
+        deadReckoning.setPose(Pose.zero());
+        motionState = MotionState.zero();
+        currentRawPose = Pose.zero();
+        currentRelativeTransform = Pose.zero();
+        lastUpdateTime = -1;
+        P = new Matrix(initialCovariance.data, initialCovariance.rows, initialCovariance.cols);
+        history.clear();
+        history.put(System.nanoTime(), new KalmanState(Pose.zero(), Velocity.zero(), Pose.zero(), P));
     }
 
     /**
