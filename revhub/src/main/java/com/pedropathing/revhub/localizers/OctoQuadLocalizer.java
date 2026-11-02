@@ -6,6 +6,7 @@ import com.pedropathing.math.Pose;
 import com.pedropathing.math.Velocity;
 import com.qualcomm.hardware.digitalchickenlabs.OctoQuad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import java.util.concurrent.TimeUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.hardware.digitalchickenlabs.OctoQuad.*;
 
@@ -41,9 +42,30 @@ public class OctoQuadLocalizer implements Localizer {
 
         reset();
 
-        while (octoQuad.getLocalizerStatus() != LocalizerStatus.RUNNING) {}
+        awaitRunning(octoQuad, 10_000);
 
         update();
+    }
+
+    static void awaitRunning(OctoQuad octoQuad, long timeoutMillis) {
+        long started = System.nanoTime();
+        LocalizerStatus status = octoQuad.getLocalizerStatus();
+        while (status != LocalizerStatus.RUNNING) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("Interrupted while waiting for OctoQuad localizer; status: " + status);
+            }
+            if (System.nanoTime() - started >= TimeUnit.MILLISECONDS.toNanos(timeoutMillis)) {
+                throw new IllegalStateException("Timed out waiting for OctoQuad localizer; status: " + status);
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(
+                        "Interrupted while waiting for OctoQuad localizer; status: " + status, e);
+            }
+            status = octoQuad.getLocalizerStatus();
+        }
     }
 
     @Override
