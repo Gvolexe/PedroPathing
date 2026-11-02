@@ -161,5 +161,7 @@ public class ThreeWheelIMULocalizer implements Localizer {
         pose = Pose.zero();
         previousIMUOrientation = Angle.normalize(imu.getHeading());
         totalHeading = 0;
+        motionState = MotionState.zero();
+        timer.reset();
     }
 }

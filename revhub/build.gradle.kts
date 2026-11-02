@@ -28,6 +28,9 @@ android {
 dependencies {
     compileOnly(libs.bundles.ftc)
     api(project(":core"))
+    testImplementation(libs.bundles.ftc)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.mockito:mockito-core:4.11.0")
     dokkaPlugin(libs.dokka.java.plugin)
 }
 

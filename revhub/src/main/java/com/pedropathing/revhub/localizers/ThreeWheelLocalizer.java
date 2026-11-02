@@ -140,5 +140,7 @@ public class ThreeWheelLocalizer implements Localizer {
         strafeEncoder.reset();
         pose = Pose.zero();
         totalHeading = 0;
+        motionState = MotionState.zero();
+        timer.reset();
     }
 }
