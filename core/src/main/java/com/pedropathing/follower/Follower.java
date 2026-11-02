@@ -149,6 +149,7 @@ public class Follower {
 
     public void hold(Pose pose, boolean useScaling) {
         clearState();
+        algorithm.reset();
         mode = Mode.HOLD;
         holdPose = pose;
         useHoldScaling = useScaling;
