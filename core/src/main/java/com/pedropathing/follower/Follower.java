@@ -138,9 +138,16 @@ public class Follower {
 
     public void follow(Path path) {
         clearState();
+        mode = Mode.IDLE;
+        try {
+            pathTracker = new PathTracker(path);
+            algorithm.reset();
+        } catch (RuntimeException | Error failure) {
+            clearState();
+            drivetrain.stop();
+            throw failure;
+        }
         mode = Mode.FOLLOW;
-        pathTracker = new PathTracker(path);
-        algorithm.reset();
     }
 
     public void hold(Pose pose) {
