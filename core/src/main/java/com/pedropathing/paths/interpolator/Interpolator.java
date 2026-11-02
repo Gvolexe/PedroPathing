@@ -18,7 +18,17 @@ public interface Interpolator {
 
     default Interpolator reverse() {
         Interpolator outer = this;
-        return (curve, t) -> Angle.normalize(outer.interpolate(curve, t) + Math.PI);
+        return new Interpolator() {
+            @Override
+            public double interpolate(Curve curve, double t) {
+                return Angle.normalize(outer.interpolate(curve, t) + Math.PI);
+            }
+
+            @Override
+            public boolean isGeometric() {
+                return outer.isGeometric();
+            }
+        };
     }
 
     static Interpolator constant(double heading) {
