@@ -8,7 +8,6 @@ import com.pedropathing.math.Matrix;
 import com.pedropathing.math.Pose;
 import com.pedropathing.math.Twist;
 import com.pedropathing.math.Vector;
-import com.pedropathing.math.Velocity;
 import com.pedropathing.utils.Angle;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -16,15 +15,15 @@ import java.util.TreeMap;
 public class FusionLocalizer implements Localizer {
     private static class KalmanState {
         Pose pose;
-        Velocity velocity;
+        Twist twist;
         Pose relativeTransform;
         Matrix covariance;
         Pose remainderTransform;
         Long upperKey;
 
-        public KalmanState(Pose pose, Velocity velocity, Pose relativeTransform, Matrix covariance) {
+        public KalmanState(Pose pose, Twist twist, Pose relativeTransform, Matrix covariance) {
             this.pose = pose;
-            this.velocity = velocity;
+            this.twist = twist;
             this.relativeTransform = relativeTransform;
             this.covariance = covariance;
         }
@@ -68,7 +67,7 @@ public class FusionLocalizer implements Localizer {
                 Math.max(measurementVariance.y(), EPSILON),
                 Math.max(measurementVariance.heading(), EPSILON));
         this.bufferSize = bufferSize;
-        history.put(0L, new KalmanState(Pose.zero(), Velocity.zero(), currentRawPose, P));
+        history.put(0L, new KalmanState(Pose.zero(), Twist.zero(), currentRawPose, P));
     }
 
     @Override
@@ -84,20 +83,20 @@ public class FusionLocalizer implements Localizer {
         double dt = lastUpdateTime < 0 ? 0 : (now - lastUpdateTime) / 1e9;
         lastUpdateTime = now;
 
-        // Updates twist, note that the dead reckoning localizer returns world-frame twist
-        Velocity currentVelocity = deadReckoning.velocity();
+        // Body-frame velocity remains valid when vision corrects the fused world frame.
+        Twist currentTwist = deadReckoning.twist();
 
         // Update the pose estimate based on dead reckoning pose transformation
         Pose rawPose = deadReckoning.pose();
         currentRelativeTransform = currentRawPose.invert().compose(rawPose);
 
         // Update Kalman states
-        P = updateCovariance(P, motionState.pose(), currentVelocity, dt);
+        P = updateCovariance(P, motionState.pose(), currentTwist, dt);
         Pose currentPosition = motionState.pose().compose(currentRelativeTransform);
         currentRawPose = rawPose;
-        motionState = MotionState.ofVelocity(currentPosition, currentVelocity);
+        motionState = MotionState.ofTwist(currentPosition, currentTwist);
 
-        history.put(now, new KalmanState(currentPosition, currentVelocity, currentRelativeTransform, P));
+        history.put(now, new KalmanState(currentPosition, currentTwist, currentRelativeTransform, P));
         if (history.size() > bufferSize) history.pollFirstEntry();
     }
 
@@ -115,7 +114,7 @@ public class FusionLocalizer implements Localizer {
         lastUpdateTime = -1;
         P = new Matrix(initialCovariance.data, initialCovariance.rows, initialCovariance.cols);
         history.clear();
-        history.put(System.nanoTime(), new KalmanState(Pose.zero(), Velocity.zero(), Pose.zero(), P));
+        history.put(System.nanoTime(), new KalmanState(Pose.zero(), Twist.zero(), Pose.zero(), P));
     }
 
     /**
@@ -141,8 +140,7 @@ public class FusionLocalizer implements Localizer {
      *
      * @param dt the time step Δt in seconds
      */
-    private Matrix updateCovariance(Matrix P, Pose pose, Velocity velocity, double dt) {
-        Twist twist = velocity.toTwist(pose.heading());
+    private Matrix updateCovariance(Matrix P, Pose pose, Twist twist, double dt) {
         Vector dist = twist.toVector().abs().times(dt);
         Vector Q_diag = new Vector(Q.getDiagonal());
         Matrix bodyQ = Matrix.diag(dist.hadamard(Q_diag));
@@ -153,7 +151,7 @@ public class FusionLocalizer implements Localizer {
     }
 
     private KalmanState getKalmanState() {
-        return new KalmanState(motionState.pose(), motionState.velocity(), currentRelativeTransform, P);
+        return new KalmanState(motionState.pose(), motionState.twist(), currentRelativeTransform, P);
     }
 
     /**
@@ -215,7 +213,7 @@ public class FusionLocalizer implements Localizer {
                     interpolatedData.upperKey,
                     new KalmanState(
                             upperEntry.pose,
-                            upperEntry.velocity,
+                            upperEntry.twist,
                             interpolatedData.remainderTransform,
                             upperEntry.covariance));
         }
@@ -238,7 +236,7 @@ public class FusionLocalizer implements Localizer {
                 .clampDiagonals(EPSILON);
         history.put(
                 timestamp,
-                new KalmanState(updatedPast, interpolatedData.velocity, interpolatedData.relativeTransform, cov));
+                new KalmanState(updatedPast, interpolatedData.twist, interpolatedData.relativeTransform, cov));
 
         // Forward propagate pose + covariance
         long prevTime = timestamp;
@@ -247,19 +245,20 @@ public class FusionLocalizer implements Localizer {
         for (NavigableMap.Entry<Long, KalmanState> entry :
                 history.tailMap(timestamp, false).entrySet()) {
             long t = entry.getKey();
-            Velocity velocity = entry.getValue().velocity;
-            if (velocity == null) velocity = velocity();
+            Twist twist = entry.getValue().twist;
+            if (twist == null) twist = twist();
 
             double dt = (t - prevTime) / 1e9;
 
             Pose relativeTransform = entry.getValue().relativeTransform;
-            cov = updateCovariance(cov, prevPose, velocity, dt);
+            cov = updateCovariance(cov, prevPose, twist, dt);
             prevPose = prevPose.compose(relativeTransform);
-            history.put(t, new KalmanState(prevPose, velocity, entry.getValue().relativeTransform, cov));
+            history.put(t, new KalmanState(prevPose, twist, entry.getValue().relativeTransform, cov));
             prevTime = t;
         }
 
-        motionState = MotionState.ofVelocity(history.lastEntry().getValue().pose, motionState.velocity());
+        KalmanState latest = history.lastEntry().getValue();
+        motionState = MotionState.ofTwist(latest.pose, latest.twist);
         P = history.lastEntry().getValue().covariance;
     }
 
@@ -275,15 +274,15 @@ public class FusionLocalizer implements Localizer {
 
         double ratio = (double) (timestamp - lowerKey) / (upperKey - lowerKey);
 
-        Velocity lowerVel = lower.velocity;
-        Velocity upperVel = upper.velocity;
-        Velocity interpolVel = lowerVel.plus(upperVel.minus(lowerVel).scale(ratio));
+        Twist lowerTwist = lower.twist;
+        Twist upperTwist = upper.twist;
+        Twist interpolTwist = lowerTwist.plus(upperTwist.minus(lowerTwist).times(ratio));
         Pose interpolPose = Pose.interpolate(lower.pose, upper.pose, ratio);
 
         Pose toMeasurement = interpolateTransform(Pose.zero(), upper.relativeTransform, ratio);
         Pose remainder = toMeasurement.invert().compose(upper.relativeTransform);
 
-        KalmanState result = new KalmanState(interpolPose, interpolVel, toMeasurement, lower.covariance);
+        KalmanState result = new KalmanState(interpolPose, interpolTwist, toMeasurement, lower.covariance);
         result.remainderTransform = remainder;
         result.upperKey = upperKey;
         return result;
@@ -298,8 +297,8 @@ public class FusionLocalizer implements Localizer {
     public void setStartPose(Pose setStart) {
         deadReckoning.setPose(setStart);
         history.clear();
-        history.put(0L, new KalmanState(setStart, Velocity.zero(), setStart, P));
-        motionState = MotionState.ofVelocity(setStart, motionState.velocity());
+        history.put(0L, new KalmanState(setStart, Twist.zero(), setStart, P));
+        motionState = MotionState.ofTwist(setStart, motionState.twist());
         currentRawPose = setStart;
     }
 
@@ -308,12 +307,12 @@ public class FusionLocalizer implements Localizer {
      */
     @Override
     public void setPose(Pose setPose) {
-        motionState = MotionState.ofVelocity(setPose, motionState.velocity());
+        motionState = MotionState.ofTwist(setPose, motionState.twist());
         deadReckoning.setPose(setPose);
         currentRawPose = setPose;
 
         history.clear();
-        history.put(System.nanoTime(), new KalmanState(setPose, motionState.velocity(), Pose.zero(), P));
+        history.put(System.nanoTime(), new KalmanState(setPose, motionState.twist(), Pose.zero(), P));
     }
 
     /**
@@ -325,7 +324,7 @@ public class FusionLocalizer implements Localizer {
             state.pose = shift.compose(state.pose);
         }
 
-        motionState = MotionState.ofVelocity(correctedPose, motionState.velocity());
+        motionState = MotionState.ofTwist(correctedPose, motionState.twist());
         deadReckoning.setPose(correctedPose);
         currentRawPose = correctedPose;
     }
