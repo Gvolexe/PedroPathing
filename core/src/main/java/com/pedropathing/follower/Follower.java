@@ -164,9 +164,13 @@ public class Follower {
         manual(new DrivePowers(forward, lateral, heading));
     }
 
+    /**
+     * Stops the current operation and drivetrain immediately, without requiring another update.
+     */
     public void stop() {
         clearState();
         mode = Mode.IDLE;
+        drivetrain.stop();
     }
 
     public void setPose(Pose pose) {
