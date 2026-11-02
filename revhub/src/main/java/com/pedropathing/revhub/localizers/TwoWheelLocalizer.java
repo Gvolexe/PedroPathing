@@ -128,5 +128,7 @@ public class TwoWheelLocalizer implements Localizer {
         yPodEncoder.reset();
         pose = Pose.zero();
         previousIMUOrientation = Angle.normalize(imu.getHeading());
+        motionState = MotionState.zero();
+        timer.reset();
     }
 }
